@@ -1,0 +1,187 @@
+---
+title: "Group 1-R codes for group project"
+
+#Please change x to your group number
+---
+
+#Step 1: load and understand the data
+```{r}
+mydata <- read.csv("Churn.csv")
+ 
+summary(mydata)
+
+str(mydata) 
+
+library(dplyr)
+library(caret)
+library(corrplot)
+library(AppliedPredictiveModeling)
+library(VIM)
+library(mice)
+
+```
+##There are totally five categorical variables: state, area_code, international_plan, voice_mail_plan, and churn.
+
+#Step 2: Preprocessing the data set
+##Delete useless variables (states and area_code) first.
+```{r}
+mydata <- select(mydata,-c("state","area_code"))
+```
+
+### Don't run this chunk When checking the Ramdon Forest Model  
+```{r}
+mydata$international_plan=as.numeric(mydata$international_plan)
+mydata$voice_mail_plan=as.numeric(mydata$voice_mail_plan)
+mydata$churn=as.numeric(mydata$churn)
+
+mydata$international_plan[mydata$international_plan==1]=0
+mydata$international_plan[mydata$international_plan==2]=1
+
+mydata$voice_mail_plan[mydata$voice_mail_plan==1]=0
+mydata$voice_mail_plan[mydata$voice_mail_plan==2]=1
+
+mydata$churn[mydata$churn==1]=0
+mydata$churn[mydata$churn==2]=1
+summary(mydata)
+```
+
+
+##For missing values, you can try different methods to impute them or delete the observations with missing values. 
+###1.KNN Method imputation method
+```{r}
+colMeans(is.na(mydata))
+mydata=kNN(mydata, k=3)
+
+mydata2=mydata[,-(19:36)]
+colMeans(is.na(mydata2))
+
+head(mydata2)
+```
+
+
+##Detect and delete the near zero variance variables if necessary.
+```{r}
+nzv=nearZeroVar(mydata2)
+nzv
+mydata3=mydata2[,-nzv]
+```
+
+##For scaling, you can try z transformation or min-max transformation. 
+```{r}
+PCA=preProcess(mydata3[,-c(2,3,17)],method = c("center","scale"))
+PCA
+#keep the 3 variables 0-1 binary
+mydata4=predict(PCA,mydata3)
+ncol(mydata4)
+```
+
+#Step 3: Splitting into training and testing data sets
+```{r}
+set.seed(2019)
+#sample(): take a sample of the specified size from the elements of x
+sample <- sample(1:nrow(mydata4),0.75*nrow(mydata4)) 
+
+#generate training data
+training <- mydata4[sample,]
+
+#generate testing data
+testing <- mydata4[-sample,]
+```
+
+#Please do not change any values in the above chunk.
+
+#Step 4: Use different methods to make the prediction.
+
+##For each method, first train the model with the training data set, and then make prediction on the testing data set. 
+##Finally, generate a confusion matrix and calculate the accuracy of each model.
+
+##Method 1: Logistic Regression-Jinping Guo
+```{r}
+#check the multicollinearity of explanatory variables
+plot(training[-c(2,3,17)])
+cor(training[-c(2,3,17)])
+
+Model1= glm(churn~.,family="binomial",data=training)
+
+summary(Model1)
+
+Model_New = glm(churn~account_length+international_plan+voice_mail_plan+total_day_minutes+
+             total_day_calls+total_day_charge+total_eve_calls+total_eve_charge+
+             total_night_calls+total_night_charge+total_intl_calls+total_intl_charge+
+             number_customer_service_calls, family="binomial",data=training)
+
+predict_train <- predict(Model_New, newdata=training,type="response")
+predict_train=as.factor(predict_train > 0.35)
+levels(predict_train) <- list(Reject="FALSE", Admit="TRUE")
+head(predict_train)
+
+table(predicted=predict_train, True=training$churn)
+
+predictTrain = predict(Model_New, newdata=training,type="response")
+#install.packages("ROCR")
+library(ROCR)
+ROCRpred = prediction(predictTrain,training$churn)
+
+ROCRperf = performance(ROCRpred, "tpr", "fpr")
+
+plot(ROCRperf)
+
+predictTest = predict(Model_New, type = "response", newdata = testing)
+table_lr <- table(testing$churn,predictTest >= 0.35)
+table_lr
+accuracy <-sum(diag(table_lr)/sum(table_lr))
+accuracy
+```
+
+##Method 3: Random Forests Molly Freidl
+```{r}
+library(randomForest)
+
+model <- randomForest(churn ~., data = training, importance=T,proximity=T)
+model
+
+model1 = predict(model, newdata=testing, type = 'class')
+model1
+
+round(importance(model),2)
+varImpPlot(model,main="Importance of Variables for the Churndata")
+
+table<- table(testing$churn, model1)
+table
+
+accuracy <-sum(diag(table)/sum(table))
+accuracy
+```
+
+##Method 4: Neural Networks-Casey Greenwald
+```{r}
+library(nnet)
+library(neuralnet)
+library(NeuralNetTools)
+
+deep_net = neuralnet(churn~.,
+                    data=training,
+                     hidden=c(6,3),
+                     linear.output=FALSE,
+                     threshold=0.01)
+#plot(deep_net)
+
+predicted_data <- neuralnet::compute(deep_net,testing[,1:16])
+print(head(predicted_data$net.result))
+results <- data.frame(actual = testing$churn, prediction = predicted_data$net.result) 
+results
+roundedresults<-sapply(results,round,digits=0)
+roundedresultsdf=data.frame(roundedresults)
+attach(roundedresultsdf)
+table_mat <- table(actual,prediction)
+table_mat
+accuracy_Test <- sum(diag(table_mat)) / sum(table_mat)
+accuracy_Test
+
+```
+
+
+#Step 5: Draw the conclusion
+The accuracies of logistic regression, random forests, and neural networks are ___85.25____%, ___94.36___%, and __95.20__%, respectively. Therefore, classifier ____neural networks______ generates the highest accuracy of __95.20___%.
+
+##The minimum accuracy is 80%.
